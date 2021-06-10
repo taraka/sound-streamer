@@ -49,13 +49,30 @@ fn main() -> Res<()> {
             .help("UDP port to use")
             .takes_value(true)
             .default_value("6969")
+    ).arg(
+        Arg::with_name("BITS")
+            .short("b")
+            .long("bits")
+            .help("Bit depth of the audio")
+            .takes_value(true)
+            .default_value("32")
+    ).arg(
+        Arg::with_name("RATE")
+            .short("r")
+            .long("rate")
+            .help("Audio sample rate")
+            .takes_value(true)
+            .default_value("44100")
     ).get_matches();
 
-
+    
     let is_listen_mode = matches.is_present("LISTEN");
     let is_stream_mode = matches.is_present("STREAM");
     let port = matches.value_of("PORT").unwrap().parse::<u16>().unwrap();
     let addr = matches.value_of("ADDR").unwrap().to_string();
+
+    let bits = matches.value_of("BITS").unwrap().parse::<usize>().unwrap();
+    let rate = matches.value_of("RATE").unwrap().parse::<usize>().unwrap();
 
     let _ = SimpleLogger::init(
         LevelFilter::Debug,
@@ -67,8 +84,8 @@ fn main() -> Res<()> {
     initialize_mta().unwrap();
 
     match (is_listen_mode, is_stream_mode) {
-        (true, false) => start_listening(port),
-        (false, true) => start_streaming(addr, port),
+        (true, false) => start_listening(port, bits, rate),
+        (false, true) => start_streaming(addr, port, bits, rate),
         (true, true) => error!("You can't listen and stream from the same app"),
         (false, false) => error!("you've got to choose what I'm meant to be doing (maybe look at --help)"),
     };
@@ -77,7 +94,7 @@ fn main() -> Res<()> {
 }
 
 
-fn start_listening(port: u16) {
+fn start_listening(port: u16, bits: usize, rate: usize) {
     let (tx_play, rx_play): (
         std::sync::mpsc::SyncSender<Vec<u8>>,
         std::sync::mpsc::Receiver<Vec<u8>>,
@@ -91,7 +108,7 @@ fn start_listening(port: u16) {
     let _handle = thread::Builder::new()
         .name("Player".to_string())
         .spawn(move || {
-            let result = playback_loop(rx_play);
+            let result = playback_loop(rx_play, bits, rate);
             if let Err(err) = result {
                 error!("Playback failed with error: {}", err);
             }
@@ -120,7 +137,7 @@ fn start_listening(port: u16) {
 }
 
 
-fn start_streaming(addr: String, port: u16) {
+fn start_streaming(addr: String, port: u16, bits: usize, rate: usize) {
     let (tx_play, rx_play): (
         std::sync::mpsc::SyncSender<Vec<u8>>,
         std::sync::mpsc::Receiver<Vec<u8>>,
@@ -145,9 +162,9 @@ fn start_streaming(addr: String, port: u16) {
     let _handle = thread::Builder::new()
         .name("Capture".to_string())
         .spawn(move || {
-            let result = capture_loop(tx_capt, chunksize);
+            let result = capture_loop(tx_capt, chunksize, bits, rate);
             if let Err(err) = result {
-                error!("Capture failed with error {}", err);
+                panic!("Capture failed with error {}", err);
             }
         });
 
@@ -156,7 +173,7 @@ fn start_streaming(addr: String, port: u16) {
             Ok(chunk) => {
                 tx_play.send(chunk).unwrap();
             }
-            Err(err) => error!("Some error {}", err),
+            Err(err) => panic!("Some error {}", err),
         }
     }
 }

@@ -4,10 +4,10 @@ use std::sync::mpsc;
 use crate::Res;
 
 // Playback loop, play samples received from channel
-pub fn playback_loop(rx_play: std::sync::mpsc::Receiver<Vec<u8>>) -> Res<()> {
+pub fn playback_loop(rx_play: std::sync::mpsc::Receiver<Vec<u8>>, bits: usize, rate: usize) -> Res<()> {
     let device = get_default_device(&Direction::Render)?;
     let mut audio_client = device.get_iaudioclient()?;
-    let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 44100, 2);
+    let desired_format = WaveFormat::new(bits, bits, &SampleType::Int, rate, 2);
 
     let blockalign = desired_format.get_blockalign();
     debug!("Desired playback format: {:?}", desired_format);
