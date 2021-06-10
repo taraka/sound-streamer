@@ -1,150 +1,126 @@
-use std::collections::VecDeque;
-use std::error;
+
+use clap::{App, Arg};
 use std::sync::mpsc;
 use std::thread;
-use wasapi::*;
 use windows::initialize_mta;
+use stream::capture_loop;
+use listen::playback_loop;
+use std::error;
+use std::net::UdpSocket;
+use std::convert::TryInto;
 
 #[macro_use]
 extern crate log;
 use simplelog::*;
 
-type Res<T> = Result<T, Box<dyn error::Error>>;
+mod listen;
+mod stream;
 
-// Playback loop, play samples received from channel
-fn playback_loop(rx_play: std::sync::mpsc::Receiver<Vec<u8>>) -> Res<()> {
-    let device = get_default_device(&Direction::Render)?;
-    let mut audio_client = device.get_iaudioclient()?;
-    let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 44100, 2);
 
-    let blockalign = desired_format.get_blockalign();
-    debug!("Desired playback format: {:?}", desired_format);
-
-    let (def_time, min_time) = audio_client.get_periods()?;
-    debug!("default period {}, min period {}", def_time, min_time);
-
-    audio_client.initialize_client(
-        &desired_format,
-        min_time as i64,
-        &Direction::Render,
-        &ShareMode::Shared,
-        true,
-    )?;
-    debug!("initialized playback");
-
-    let h_event = audio_client.set_get_eventhandle()?;
-
-    let mut buffer_frame_count = audio_client.get_bufferframecount()?;
-
-    let render_client = audio_client.get_audiorenderclient()?;
-    let mut sample_queue: VecDeque<u8> = VecDeque::with_capacity(
-        100 * blockalign as usize * (1024 + 2 * buffer_frame_count as usize),
-    );
-    audio_client.start_stream()?;
-    loop {
-        buffer_frame_count = audio_client.get_available_space_in_frames()?;
-        trace!("New buffer frame count {}", buffer_frame_count);
-        while sample_queue.len() < (blockalign as usize * buffer_frame_count as usize) {
-            debug!("need more samples");
-            match rx_play.try_recv() {
-                Ok(chunk) => {
-                    trace!("got chunk");
-                    for element in chunk.iter() {
-                        sample_queue.push_back(*element);
-                    }
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    warn!("no data, filling with zeros");
-                    for _ in 0..((blockalign as usize * buffer_frame_count as usize)
-                        - sample_queue.len())
-                    {
-                        sample_queue.push_back(0);
-                    }
-                }
-                Err(_) => {
-                    error!("Channel is closed");
-                    break;
-                }
-            }
-        }
-
-        trace!("write");
-        render_client.write_to_device_from_deque(
-            buffer_frame_count as usize,
-            blockalign as usize,
-            &mut sample_queue,
-        )?;
-        trace!("write ok");
-        if h_event.wait_for_event(100000).is_err() {
-            error!("error, stopping playback");
-            audio_client.stop_stream()?;
-            break;
-        }
-    }
-    Ok(())
-}
-
-// Capture loop, capture samples and send in chunks of "chunksize" frames to channel
-fn capture_loop(tx_capt: std::sync::mpsc::SyncSender<Vec<u8>>, chunksize: usize) -> Res<()> {
-    let device = get_default_device(&Direction::Render)?;
-    let mut audio_client = device.get_iaudioclient()?;
-
-    let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 44100, 2);
-
-    let blockalign = desired_format.get_blockalign();
-    debug!("Desired capture format: {:?}", desired_format);
-
-    let (def_time, min_time) = audio_client.get_periods()?;
-    debug!("default period {}, min period {}", def_time, min_time);
-
-    audio_client.initialize_client(
-        &desired_format,
-        min_time as i64,
-        &Direction::Capture,
-        &ShareMode::Shared,
-        true,
-    )?;
-    debug!("initialized capture");
-
-    let h_event = audio_client.set_get_eventhandle()?;
-
-    let buffer_frame_count = audio_client.get_bufferframecount()?;
-
-    let render_client = audio_client.get_audiocaptureclient()?;
-    let mut sample_queue: VecDeque<u8> = VecDeque::with_capacity(
-        100 * blockalign as usize * (1024 + 2 * buffer_frame_count as usize),
-    );
-    audio_client.start_stream()?;
-    loop {
-        while sample_queue.len() > (blockalign as usize * chunksize as usize) {
-            debug!("pushing samples");
-            let mut chunk = vec![0u8; blockalign as usize * chunksize as usize];
-            for element in chunk.iter_mut() {
-                *element = sample_queue.pop_front().unwrap();
-            }
-            tx_capt.send(chunk)?;
-        }
-        trace!("capturing");
-        render_client.read_from_device_to_deque(blockalign as usize, &mut sample_queue)?;
-        if h_event.wait_for_event(1000000).is_err() {
-            error!("error, stopping capture");
-            audio_client.stop_stream()?;
-            break;
-        }
-    }
-    Ok(())
-}
+pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 // Main loop
 fn main() -> Res<()> {
+
+    let matches = App::new("srtpsrv")
+    .arg(
+        Arg::with_name("LISTEN")
+            .short("l")
+            .long("listen")
+            .help("Listen to some tunes")
+            .takes_value(false)
+    ).arg(
+        Arg::with_name("STREAM")
+            .short("s")
+            .long("stream")
+            .help("Send your audio to a friend")
+            .takes_value(false)
+    ).arg(
+        Arg::with_name("ADDR")
+            .short("i")
+            .long("ip")
+            .help("ip address")
+            .takes_value(true)
+            .default_value("127.0.0.1")
+    ).arg(
+        Arg::with_name("PORT")
+            .short("p")
+            .long("port")
+            .help("UDP port to use")
+            .takes_value(true)
+            .default_value("6969")
+    ).get_matches();
+
+
+    let is_listen_mode = matches.is_present("LISTEN");
+    let is_stream_mode = matches.is_present("STREAM");
+    let port = matches.value_of("PORT").unwrap().parse::<u16>().unwrap();
+    let addr = matches.value_of("ADDR").unwrap().to_string();
+
     let _ = SimpleLogger::init(
-        LevelFilter::Trace,
+        LevelFilter::Debug,
         ConfigBuilder::new()
             .set_time_format_str("%H:%M:%S%.3f")
             .build(),
     );
 
-    initialize_mta()?;
+    initialize_mta().unwrap();
+
+    match (is_listen_mode, is_stream_mode) {
+        (true, false) => start_listening(port),
+        (false, true) => start_streaming(addr, port),
+        (true, true) => error!("You can't listen and stream from the same app"),
+        (false, false) => error!("you've got to choose what I'm meant to be doing (maybe look at --help)"),
+    };
+
+    Ok(())
+}
+
+
+fn start_listening(port: u16) {
+    let (tx_play, rx_play): (
+        std::sync::mpsc::SyncSender<Vec<u8>>,
+        std::sync::mpsc::Receiver<Vec<u8>>,
+    ) = mpsc::sync_channel(2);
+    let (tx_capt, rx_capt): (
+        std::sync::mpsc::SyncSender<Vec<u8>>,
+        std::sync::mpsc::Receiver<Vec<u8>>,
+    ) = mpsc::sync_channel(2);
+
+    // Playback
+    let _handle = thread::Builder::new()
+        .name("Player".to_string())
+        .spawn(move || {
+            let result = playback_loop(rx_play);
+            if let Err(err) = result {
+                error!("Playback failed with error: {}", err);
+            }
+        });
+
+    // Capture
+    let _handle = thread::Builder::new()
+        .name("Network".to_string())
+        .spawn(move || {
+            let result = udp_recv_loop(tx_capt, port);
+            if let Err(err) = result {
+                error!("Recv error: {}", err);
+            }
+        });
+
+    loop {
+        match rx_capt.recv() {
+            Ok(chunk) => {
+                
+                debug!("sending");
+                tx_play.send(chunk).unwrap();
+            }
+            Err(err) => error!("Some error {}", err),
+        }
+    }
+}
+
+
+fn start_streaming(addr: String, port: u16) {
     let (tx_play, rx_play): (
         std::sync::mpsc::SyncSender<Vec<u8>>,
         std::sync::mpsc::Receiver<Vec<u8>>,
@@ -157,11 +133,11 @@ fn main() -> Res<()> {
 
     // Playback
     let _handle = thread::Builder::new()
-        .name("Player".to_string())
+        .name("Network".to_string())
         .spawn(move || {
-            let result = playback_loop(rx_play);
+            let result = udp_send_loop(rx_play, &addr, port);
             if let Err(err) = result {
-                error!("Playback failed with error {}", err);
+                error!("send failed with error {}", err);
             }
         });
 
@@ -178,10 +154,47 @@ fn main() -> Res<()> {
     loop {
         match rx_capt.recv() {
             Ok(chunk) => {
-                debug!("sending");
                 tx_play.send(chunk).unwrap();
             }
             Err(err) => error!("Some error {}", err),
         }
     }
+}
+
+fn udp_send_loop(rx_play: std::sync::mpsc::Receiver<Vec<u8>>, addr: &str, port: u16) -> Res<()>  {
+
+    let host = format!("{}:{}", addr, port);
+
+    let mut socket = UdpSocket::bind("0.0.0.0:3400").expect("couldn't bind to address");
+    socket.connect(&host).expect("connect function failed");
+
+    loop {
+        match rx_play.recv() {
+            Ok(chunk) => {
+                debug!("sending {}", chunk.len());
+                socket.send(&chunk).expect("couldn't send message");
+            }
+            Err(err) => error!("Some error {}", err),
+        }
+    }
+
+    Ok(())
+}
+
+
+fn udp_recv_loop(tx_capt: std::sync::mpsc::SyncSender<Vec<u8>>, port: u16) -> Res<()>  {
+
+    let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
+
+    // Receives a single datagram message on the socket. If `buf` is too small to hold
+    // the message, it will be cut off.
+    let mut buf = [0; 32768];
+
+    loop {
+        let (amt, src) = socket.recv_from(&mut buf)?;
+        error!("Got {} bytes from {}", amt, src);
+        tx_capt.send(buf.to_vec());
+    }
+
+    Ok(())
 }
