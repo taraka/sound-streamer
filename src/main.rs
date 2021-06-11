@@ -63,6 +63,13 @@ fn main() -> Res<()> {
             .help("Audio sample rate")
             .takes_value(true)
             .default_value("44100")
+    ).arg(
+        Arg::with_name("CHUNKSIZE")
+            .short("c")
+            .long("chunksize")
+            .help("Chunk size for capturing audio")
+            .takes_value(true)
+            .default_value("4096")
     ).get_matches();
 
     
@@ -73,6 +80,7 @@ fn main() -> Res<()> {
 
     let bits = matches.value_of("BITS").unwrap().parse::<usize>().unwrap();
     let rate = matches.value_of("RATE").unwrap().parse::<usize>().unwrap();
+    let chunksize = matches.value_of("CHUNKSIZE").unwrap().parse::<usize>().unwrap();
 
     let _ = SimpleLogger::init(
         LevelFilter::Debug,
@@ -85,7 +93,7 @@ fn main() -> Res<()> {
 
     match (is_listen_mode, is_stream_mode) {
         (true, false) => start_listening(port, bits, rate),
-        (false, true) => start_streaming(addr, port, bits, rate),
+        (false, true) => start_streaming(chunksize, addr, port, bits, rate),
         (true, true) => error!("You can't listen and stream from the same app"),
         (false, false) => error!("you've got to choose what I'm meant to be doing (maybe look at --help)"),
     };
@@ -127,8 +135,6 @@ fn start_listening(port: u16, bits: usize, rate: usize) {
     loop {
         match rx_capt.recv() {
             Ok(chunk) => {
-                
-                debug!("sending");
                 tx_play.send(chunk).unwrap();
             }
             Err(err) => error!("Some error {}", err),
@@ -137,7 +143,7 @@ fn start_listening(port: u16, bits: usize, rate: usize) {
 }
 
 
-fn start_streaming(addr: String, port: u16, bits: usize, rate: usize) {
+fn start_streaming(chunksize: usize, addr: String, port: u16, bits: usize, rate: usize) {
     let (tx_play, rx_play): (
         std::sync::mpsc::SyncSender<Vec<u8>>,
         std::sync::mpsc::Receiver<Vec<u8>>,
@@ -146,7 +152,6 @@ fn start_streaming(addr: String, port: u16, bits: usize, rate: usize) {
         std::sync::mpsc::SyncSender<Vec<u8>>,
         std::sync::mpsc::Receiver<Vec<u8>>,
     ) = mpsc::sync_channel(2);
-    let chunksize = 4096;
 
     // Playback
     let _handle = thread::Builder::new()
