@@ -4,7 +4,12 @@ use wasapi::*;
 use crate::Res;
 
 // Capture loop, capture samples and send in chunks of "chunksize" frames to channel
-pub fn capture_loop(tx_capt: std::sync::mpsc::SyncSender<Vec<u8>>, chunksize: usize, bits: usize, rate: usize) -> Res<()> {
+pub fn capture_loop(
+    tx_capt: std::sync::mpsc::SyncSender<Vec<u8>>,
+    chunksize: usize,
+    bits: usize,
+    rate: usize,
+) -> Res<()> {
     let device = get_default_device(&Direction::Render)?;
     let mut audio_client = device.get_iaudioclient()?;
 

@@ -1,13 +1,11 @@
-
 use clap::{App, Arg};
-use std::sync::mpsc;
-use std::thread;
-use windows::initialize_mta;
-use stream::capture_loop;
 use listen::playback_loop;
 use std::error;
 use std::net::UdpSocket;
-use std::convert::TryInto;
+use std::sync::mpsc;
+use std::thread;
+use stream::capture_loop;
+use windows::initialize_mta;
 
 #[macro_use]
 extern crate log;
@@ -16,63 +14,67 @@ use simplelog::*;
 mod listen;
 mod stream;
 
-
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 // Main loop
 fn main() -> Res<()> {
-
     let matches = App::new("srtpsrv")
-    .arg(
-        Arg::with_name("LISTEN")
-            .short("l")
-            .long("listen")
-            .help("Listen to some tunes")
-            .takes_value(false)
-    ).arg(
-        Arg::with_name("STREAM")
-            .short("s")
-            .long("stream")
-            .help("Send your audio to a friend")
-            .takes_value(false)
-    ).arg(
-        Arg::with_name("ADDR")
-            .short("i")
-            .long("ip")
-            .help("ip address")
-            .takes_value(true)
-            .default_value("127.0.0.1")
-    ).arg(
-        Arg::with_name("PORT")
-            .short("p")
-            .long("port")
-            .help("UDP port to use")
-            .takes_value(true)
-            .default_value("6969")
-    ).arg(
-        Arg::with_name("BITS")
-            .short("b")
-            .long("bits")
-            .help("Bit depth of the audio")
-            .takes_value(true)
-            .default_value("32")
-    ).arg(
-        Arg::with_name("RATE")
-            .short("r")
-            .long("rate")
-            .help("Audio sample rate")
-            .takes_value(true)
-            .default_value("44100")
-    ).arg(
-        Arg::with_name("CHUNKSIZE")
-            .short("c")
-            .long("chunksize")
-            .help("Chunk size for capturing audio")
-            .takes_value(true)
-            .default_value("4096")
-    ).get_matches();
+        .arg(
+            Arg::with_name("LISTEN")
+                .short("l")
+                .long("listen")
+                .help("Listen to some tunes")
+                .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("STREAM")
+                .short("s")
+                .long("stream")
+                .help("Send your audio to a friend")
+                .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("ADDR")
+                .short("i")
+                .long("ip")
+                .help("ip address")
+                .takes_value(true)
+                .default_value("127.0.0.1"),
+        )
+        .arg(
+            Arg::with_name("PORT")
+                .short("p")
+                .long("port")
+                .help("UDP port to use")
+                .takes_value(true)
+                .default_value("6969"),
+        )
+        .arg(
+            Arg::with_name("BITS")
+                .short("b")
+                .long("bits")
+                .help("Bit depth of the audio")
+                .takes_value(true)
+                .default_value("32"),
+        )
+        .arg(
+            Arg::with_name("RATE")
+                .short("r")
+                .long("rate")
+                .help("Audio sample rate")
+                .takes_value(true)
+                .default_value("44100"),
+        )
+        .arg(
+            Arg::with_name("CHUNKSIZE")
+                .short("c")
+                .long("chunksize")
+                .help("Chunk size for capturing audio")
+                .takes_value(true)
+                .default_value("4096"),
+        )
+        .get_matches();
 
-    
     let is_listen_mode = matches.is_present("LISTEN");
     let is_stream_mode = matches.is_present("STREAM");
     let port = matches.value_of("PORT").unwrap().parse::<u16>().unwrap();
@@ -80,7 +82,11 @@ fn main() -> Res<()> {
 
     let bits = matches.value_of("BITS").unwrap().parse::<usize>().unwrap();
     let rate = matches.value_of("RATE").unwrap().parse::<usize>().unwrap();
-    let chunksize = matches.value_of("CHUNKSIZE").unwrap().parse::<usize>().unwrap();
+    let chunksize = matches
+        .value_of("CHUNKSIZE")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
 
     let _ = SimpleLogger::init(
         LevelFilter::Warn,
@@ -95,12 +101,13 @@ fn main() -> Res<()> {
         (true, false) => start_listening(port, bits, rate),
         (false, true) => start_streaming(chunksize, addr, port, bits, rate),
         (true, true) => error!("You can't listen and stream from the same app"),
-        (false, false) => error!("you've got to choose what I'm meant to be doing (maybe look at --help)"),
+        (false, false) => {
+            error!("you've got to choose what I'm meant to be doing (maybe look at --help)")
+        }
     };
 
     Ok(())
 }
-
 
 fn start_listening(port: u16, bits: usize, rate: usize) {
     let (tx_play, rx_play): (
@@ -142,7 +149,6 @@ fn start_listening(port: u16, bits: usize, rate: usize) {
     }
 }
 
-
 fn start_streaming(chunksize: usize, addr: String, port: u16, bits: usize, rate: usize) {
     let (tx_play, rx_play): (
         std::sync::mpsc::SyncSender<Vec<u8>>,
@@ -183,11 +189,10 @@ fn start_streaming(chunksize: usize, addr: String, port: u16, bits: usize, rate:
     }
 }
 
-fn udp_send_loop(rx_play: std::sync::mpsc::Receiver<Vec<u8>>, addr: &str, port: u16) -> Res<()>  {
-
+fn udp_send_loop(rx_play: std::sync::mpsc::Receiver<Vec<u8>>, addr: &str, port: u16) -> Res<()> {
     let host = format!("{}:{}", addr, port);
 
-    let mut socket = UdpSocket::bind("0.0.0.0:3400").expect("couldn't bind to address");
+    let socket = UdpSocket::bind("0.0.0.0:3400").expect("couldn't bind to address");
     socket.connect(&host).expect("connect function failed");
 
     loop {
@@ -199,13 +204,9 @@ fn udp_send_loop(rx_play: std::sync::mpsc::Receiver<Vec<u8>>, addr: &str, port: 
             Err(err) => error!("Some error {}", err),
         }
     }
-
-    Ok(())
 }
 
-
-fn udp_recv_loop(tx_capt: std::sync::mpsc::SyncSender<Vec<u8>>, port: u16) -> Res<()>  {
-
+fn udp_recv_loop(tx_capt: std::sync::mpsc::SyncSender<Vec<u8>>, port: u16) -> Res<()> {
     let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
 
     // Receives a single datagram message on the socket. If `buf` is too small to hold
@@ -215,8 +216,6 @@ fn udp_recv_loop(tx_capt: std::sync::mpsc::SyncSender<Vec<u8>>, port: u16) -> Re
     loop {
         let (amt, src) = socket.recv_from(&mut buf)?;
         debug!("Got {} bytes from {}", amt, src);
-        tx_capt.send(buf.to_vec());
+        tx_capt.send(buf.to_vec()).unwrap();
     }
-
-    Ok(())
 }

@@ -1,4 +1,4 @@
- extern crate clap;
+extern crate clap;
 extern crate fibers;
 extern crate futures;
 #[macro_use]
@@ -23,17 +23,20 @@ fn main() {
                 .short("p")
                 .takes_value(true)
                 .default_value("6000"),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("MASTER_KEY")
                 .short("k")
                 .takes_value(true)
                 .default_value("d34d74f37d74e75f3bdb4f76f1bdf477"),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("MASTER_SALT")
                 .short("s")
                 .takes_value(true)
                 .default_value("7f1fe35d78f77e75e79f7beb5f7a"),
-        ).get_matches();
+        )
+        .get_matches();
     let port = matches.value_of("PORT").unwrap();
     let addr = format!("0.0.0.0:{}", port).parse().unwrap();
 

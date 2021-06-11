@@ -1,10 +1,14 @@
-use std::collections::VecDeque;
-use wasapi::*;
-use std::sync::mpsc;
 use crate::Res;
+use std::collections::VecDeque;
+use std::sync::mpsc;
+use wasapi::*;
 
 // Playback loop, play samples received from channel
-pub fn playback_loop(rx_play: std::sync::mpsc::Receiver<Vec<u8>>, bits: usize, rate: usize) -> Res<()> {
+pub fn playback_loop(
+    rx_play: std::sync::mpsc::Receiver<Vec<u8>>,
+    bits: usize,
+    rate: usize,
+) -> Res<()> {
     let device = get_default_device(&Direction::Render)?;
     let mut audio_client = device.get_iaudioclient()?;
     let desired_format = WaveFormat::new(bits, bits, &SampleType::Int, rate, 2);
