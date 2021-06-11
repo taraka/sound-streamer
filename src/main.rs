@@ -83,7 +83,7 @@ fn main() -> Res<()> {
     let chunksize = matches.value_of("CHUNKSIZE").unwrap().parse::<usize>().unwrap();
 
     let _ = SimpleLogger::init(
-        LevelFilter::Debug,
+        LevelFilter::Warn,
         ConfigBuilder::new()
             .set_time_format_str("%H:%M:%S%.3f")
             .build(),
@@ -214,7 +214,7 @@ fn udp_recv_loop(tx_capt: std::sync::mpsc::SyncSender<Vec<u8>>, port: u16) -> Re
 
     loop {
         let (amt, src) = socket.recv_from(&mut buf)?;
-        error!("Got {} bytes from {}", amt, src);
+        debug!("Got {} bytes from {}", amt, src);
         tx_capt.send(buf.to_vec());
     }
 
